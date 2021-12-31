@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "resource.h"
+#include <libPPUI/wtl-pp.h> // CCheckBox
 #include "hackrf.h"
 #include <stdlib.h>
 #include <math.h>
@@ -9,7 +10,7 @@
 
 
 #define BUF_LEN 262144         //hackrf tx buf
-#define BUF_NUM  16
+#define BUF_NUM  24
 #define M_PI 3.14159265358979323846
 #define SAMPLERATE 2000000
 
