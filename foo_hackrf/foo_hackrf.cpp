@@ -10,13 +10,13 @@
 
 
 #define BUF_LEN 262144         //hackrf tx buf
-#define BUF_NUM  24
+#define BUF_NUM  32
 #define M_PI 3.14159265358979323846
-#define SAMPLERATE 2000000
+#define SAMPLERATE 2850000
 
 DECLARE_COMPONENT_VERSION(
 "HackRF Transmitter",
-"0.1.0",
+"0.1.0.2",
 "Source Code:https://github.com/jocover/foo_hackrf \n"
 "DLL:https://www.jiangwei.org/download/foo_hackrf.zip \n");
 
@@ -38,7 +38,7 @@ static config default{
 		90,
 		0,//mode WBFM=0 NBFM=1 AM=2
 		40,
-		1};
+		0};
 
 static bool running = false;
 
@@ -96,7 +96,7 @@ public:
 		}
 		else {
 			hackrf_set_sample_rate(_dev, SAMPLERATE);
-			hackrf_set_baseband_filter_bandwidth(_dev, SAMPLERATE*0.75);
+			hackrf_set_baseband_filter_bandwidth(_dev, SAMPLERATE * 3 / 4);
 			hackrf_set_freq(_dev, freq);
 			hackrf_set_txvga_gain(_dev, tx_vga);
 			hackrf_set_lna_gain(_dev, 24);
@@ -146,32 +146,53 @@ public:
 
 		integerfactor = SAMPLERATE*1.0 / chunk->get_sample_rate();
 
-		if (input_audio_buf.size() != sample_count)
-			input_audio_buf.resize(sample_count);
+		if (input_audio_buf.first.size() != sample_count)
+			input_audio_buf.first.resize(sample_count);
+		if (input_audio_buf.second.size() != sample_count)
+			input_audio_buf.second.resize(sample_count);
 
-		if (output_audio_buf.size() != size_t(sample_count*integerfactor)) {
-			output_audio_buf.resize(size_t(sample_count*integerfactor));
+		if (mixed_output_audio_buf.size() != size_t(sample_count*integerfactor)) {
+			
+			output_audio_buf.first.resize(size_t(sample_count*integerfactor));
+			output_audio_buf.second.resize(size_t(sample_count*integerfactor));
+
+			mixed_output_audio_buf.resize(size_t(sample_count*integerfactor));
+			
 			iq_buf.resize(size_t(sample_count*integerfactor) * 2);
 		}
 
 		if (chunk->get_channels() == 1 && chunk->get_channel_config() == audio_chunk::channel_config_mono) {
 			for (uint32_t i = 0; i < sample_count; i++) {
 
-				input_audio_buf[i] = source_audio_buf[i];
+				input_audio_buf.first[i] = source_audio_buf[i];
+				input_audio_buf.second[i] = source_audio_buf[i];
 			}
 		}
-		else if (chunk->get_channels() == 2 && chunk->get_channel_config() == audio_chunk::channel_config_stereo) {
+		else if (chunk->get_channels() == 2 && chunk->get_channel_config() == audio_chunk::channel_config_stereo) { /* Stereo */
 			for (uint32_t i = 0; i < sample_count; i++) {
-
-				input_audio_buf[i] = (source_audio_buf[i * 2] + source_audio_buf[i * 2 + 1]) / (float)2.0;
+				input_audio_buf.first[i] = source_audio_buf[i * 2];
+				input_audio_buf.second[i] = source_audio_buf[i * 2 + 1];
 			}
 
 		}
 
 
-		interpolation(input_audio_buf.data(), sample_count, output_audio_buf.data(), size_t(sample_count*integerfactor), last_in_samples);
+		interpolation(input_audio_buf.first.data(), sample_count, output_audio_buf.first.data(), (uint32_t)(sample_count*integerfactor), last_in_samples_r);
+		interpolation(input_audio_buf.second.data(), sample_count, output_audio_buf.second.data(), (uint32_t)(sample_count*integerfactor), last_in_samples_l);
 
-		modulation(output_audio_buf.data(), size_t(sample_count*integerfactor), iq_buf.data(), mode);
+		preemph(output_audio_buf.first.data(), prev_samples[0], (uint32_t)(sample_count*integerfactor), 0);
+		preemph(output_audio_buf.second.data(), prev_samples[1], (uint32_t)(sample_count*integerfactor), 0);
+
+		for (uint32_t i = 0; i < (size_t)(sample_count*integerfactor); i++) {
+			mixed_output_audio_buf[i] = float(((output_audio_buf.second[i] + output_audio_buf.first[i]) * 0.45) + \
+				((cos((duration * 38000 * 2 * M_PI / SAMPLERATE))) * \
+				(output_audio_buf.second[i] - output_audio_buf.first[i]) * 0.45) + \
+				(cos((duration * 19000 * 2 * M_PI / SAMPLERATE)) * 0.1));
+			if ((++duration) > (4 * SAMPLERATE / 19000))
+				duration = 0;
+		}
+
+		modulation(mixed_output_audio_buf.data(), size_t(sample_count*integerfactor), iq_buf.data(), mode);
 
 		send(iq_buf.data(), size_t(sample_count*integerfactor));
 
@@ -275,6 +296,22 @@ private:
 			last_in_samples[j] = in_buf[i];
 	}
 
+	void preemph(float * buf, float prev[2], uint32_t samples, uint32_t tau_75) {
+
+		static const double preemph_btaps[2][2] = { 29.498236311937575, -27.70989987735248, 43.80803296614535, -42.01969653156026 };
+		static const double preemph_ataps[2] = { 1.0, 0.7883364345850924 };
+
+		for (uint32_t i = 0; i < samples; i++) {
+			prev[0] = buf[i];
+
+			/* b0x(n) + b1x(n - 1) - a1 * y(n - 1) */
+			buf[i] = (float)(preemph_btaps[tau_75][0] * buf[i] + preemph_btaps[tau_75][1] * prev[0] - preemph_ataps[1] * prev[1]);
+			
+			prev[1] = buf[i];
+		}
+
+	}
+
 	void modulation(float * input, uint32_t input_len, float * output, uint32_t mode) {
 
 		if (mode == 0) {
@@ -365,8 +402,8 @@ private:
 
 	}
 
-	std::vector<float> input_audio_buf;
-	std::vector<float> output_audio_buf;
+	std::pair<std::vector<float>, std::vector<float> > input_audio_buf, output_audio_buf;
+	std::vector<float> mixed_output_audio_buf;
 	std::vector<float> iq_buf;
 	std::condition_variable cond;
 	std::mutex mutex;
@@ -380,6 +417,7 @@ private:
 
 	double integerfactor;
 	size_t sample_count;
+	uint32_t duration = 0;
 
 	config conf;
 	int8_t ** _buf = NULL;
@@ -391,7 +429,10 @@ private:
 
 	double fm_phase;
 	double fm_deviation;
-	float last_in_samples[4] = { 0.0, 0.0, 0.0, 0.0 };
+	float last_in_samples_l[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	float last_in_samples_r[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+
+	float prev_samples[2][2] = { 0.0f, 0.0f, 0.0f, 0.0f };
 };
 
 int _hackrf_tx_callback(hackrf_transfer *transfer) {
@@ -443,7 +484,8 @@ private:
 			char freq[20];
 			sprintf_s(freq, "%.2f", _config.freq);
 			wchar_t wstr[20];
-			std::mbstowcs(wstr, freq, 20);
+			size_t ret_val;
+			mbstowcs_s(&ret_val,wstr, freq, 20);
 			m_edit_freq.SetWindowTextW(wstr);
 
 			m_check_amp.SetCheck(_config.enableamp);
