@@ -301,11 +301,14 @@ private:
 		static const double preemph_btaps[2][2] = { 29.498236311937575, -27.70989987735248, 43.80803296614535, -42.01969653156026 };
 		static const double preemph_ataps[2] = { 1.0, 0.7883364345850924 };
 
+		float last_input;
+
 		for (uint32_t i = 0; i < samples; i++) {
+			last_input = prev[0];
 			prev[0] = buf[i];
 
 			/* b0x(n) + b1x(n - 1) - a1 * y(n - 1) */
-			buf[i] = (float)(preemph_btaps[tau_75][0] * buf[i] + preemph_btaps[tau_75][1] * prev[0] - preemph_ataps[1] * prev[1]);
+			buf[i] = (float)(preemph_btaps[tau_75][0] * buf[i] + preemph_btaps[tau_75][1] * last_input - preemph_ataps[1] * prev[1]);
 			
 			prev[1] = buf[i];
 		}
