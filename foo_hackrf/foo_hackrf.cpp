@@ -32,6 +32,7 @@ struct config {
 	uint32_t tx_vga;
 	uint32_t enableamp;
 	uint32_t enstereo;
+	uint32_t tau;
 
 };
 static config default{
@@ -40,7 +41,8 @@ static config default{
 		0,//mode WBFM=0 NBFM=1 AM=2
 		40,
 		0,
-		1};
+		1,
+		0}; //tau 50us=0 75us=1 0us=2
 
 static bool running = false;
 
@@ -79,6 +81,7 @@ public:
 		tx_vga = conf.tx_vga;
 		enableamp = conf.enableamp;
 		enstereo = conf.enstereo;
+		tau = conf.tau;
 
 		count = tail = head = offset = 0;
 		samp_avail = BUF_LEN / 2;
@@ -180,14 +183,16 @@ public:
 
 
 		interpolation(input_audio_buf.first.data(), sample_count, output_audio_buf.first.data(), (uint32_t)(sample_count*integerfactor), last_in_samples_r);
-		preemph(output_audio_buf.first.data(), prev_samples[0], (uint32_t)(sample_count*integerfactor), 0);
+		if ((mode != 2) && (tau != 2)) /* FM mode */
+			preemph(output_audio_buf.first.data(), prev_samples[0], (uint32_t)(sample_count*integerfactor), tau);
 
 		if (chunk->get_channels() == 1 && chunk->get_channel_config() == audio_chunk::channel_config_mono) {
 			mixed_output_audio_buf.swap(output_audio_buf.first);
 		}
 		else {
 			interpolation(input_audio_buf.second.data(), sample_count, output_audio_buf.second.data(), (uint32_t)(sample_count*integerfactor), last_in_samples_l);
-			preemph(output_audio_buf.second.data(), prev_samples[1], (uint32_t)(sample_count*integerfactor), 0);
+			if ((mode != 2) && (tau != 2)) /* FM mode */
+				preemph(output_audio_buf.second.data(), prev_samples[1], (uint32_t)(sample_count*integerfactor), tau);
 
 			if (enstereo && (!mode)) { /* Stereo is available only to WBFM mode */
 				for (uint32_t i = 0; i < (size_t)(sample_count*integerfactor); i++) {
@@ -259,7 +264,7 @@ public:
 	static bool g_have_config_popup() { return true; }
 	static void make_preset(config conf, dsp_preset & out) {
 		dsp_preset_builder builder;
-		builder << conf.freq << conf.gain << conf.mode << conf.tx_vga << conf.enableamp << conf.enstereo;
+		builder << conf.freq << conf.gain << conf.mode << conf.tx_vga << conf.enableamp << conf.enstereo << conf.tau;
 		builder.finish(g_get_guid(), out);
 	}
 
@@ -268,7 +273,7 @@ public:
 
 		try {
 			dsp_preset_parser parser(in);
-			parser >> conf.freq >> conf.gain >> conf.mode >> conf.tx_vga >> conf.enableamp >> conf.enstereo;
+			parser >> conf.freq >> conf.gain >> conf.mode >> conf.tx_vga >> conf.enableamp >> conf.enstereo >> conf.tau;
 		}
 		catch (exception_io_data) { conf = default; }
 	}
@@ -432,6 +437,7 @@ private:
 	uint32_t tx_vga;
 	uint8_t enableamp;
 	uint32_t enstereo;
+	uint32_t tau;
 
 	double integerfactor;
 	size_t sample_count;
@@ -491,6 +497,7 @@ private:
 		m_check_amp = GetDlgItem(IDC_CHECK_AMP);
 		m_check_stereo = GetDlgItem(IDC_CHECK_STEREO);
 		m_combo_mode = GetDlgItem(IDC_COMBO_MODE);
+		m_combo_tau = GetDlgItem(IDC_COMBO_TAU);
 		m_slider.SetRange(0, GainTotal);
 		m_slider_tx.SetRange(0, TxGainTotal);
 
@@ -515,8 +522,20 @@ private:
 			m_combo_mode.AddString(L"AM");
 			m_combo_mode.SetCurSel(_config.mode);
 
+			m_combo_tau.AddString(L"50¦Ìs");
+			m_combo_tau.AddString(L"75¦Ìs");
+			m_combo_tau.AddString(L"0¦Ìs");
+			m_combo_tau.SetCurSel(_config.tau);
+
 			RefreshLabel((uint32_t)_config.gain);
 			RefreshTXLabel(_config.tx_vga);
+
+			if (m_combo_mode.GetCurSel() != 0) {
+				m_check_stereo.EnableWindow(FALSE);
+				if (m_combo_mode.GetCurSel() == 2)
+					m_combo_tau.EnableWindow(FALSE);
+			}
+
 			conf = _config;
 		}
 		return TRUE;
@@ -531,6 +550,7 @@ private:
 			conf.freq = static_cast<float>(_wtof(str));
 
 			conf.mode = m_combo_mode.GetCurSel();
+			conf.tau = m_combo_tau.GetCurSel();
 			conf.enableamp = m_check_amp.GetCheck();
 			conf.enstereo = m_check_stereo.GetCheck();
 			conf.gain = (uint32_t)m_slider.GetPos();
@@ -546,20 +566,39 @@ private:
 		{
 			// Data not changed
 			EndDialog(0);
-		}
-		break;
+		}break;
 		case IDC_COMBO_MODE:
 		{
 			if (uNotifyCode == CBN_SELCHANGE) {
-				if (m_combo_mode.GetCurSel()) { /* non-WBFM mode */
-					m_check_stereo.SetCheck(0);
-					m_check_stereo.EnableWindow(FALSE);
-				}
-				else { /* WBFM mode */
+				switch (m_combo_mode.GetCurSel()) {
+				case 0: /* WBFM mode */
+				{
 					m_check_stereo.SetCheck(1);
 					m_check_stereo.EnableWindow();
+
+					m_combo_tau.SetCurSel(0);
+					m_combo_tau.EnableWindow();
+				}break;
+				case 1: /* NBFM mode */
+				{
+					m_check_stereo.SetCheck(0);
+					m_check_stereo.EnableWindow(FALSE);
+
+					m_combo_tau.SetCurSel(0);
+					m_combo_tau.EnableWindow();
+				}break;
+				case 2: /* AM mode */
+				{
+					m_check_stereo.SetCheck(0);
+					m_check_stereo.EnableWindow(FALSE);
+
+					m_combo_tau.SetCurSel(2);
+					m_combo_tau.EnableWindow(FALSE);
+				}
+				break;
 				}
 				m_check_stereo.UpdateWindow();
+				m_combo_tau.UpdateWindow();
 			}
 		}
 		break;
@@ -596,6 +635,7 @@ private:
 	CCheckBox m_check_amp;
 	CCheckBox m_check_stereo;
 	CComboBox m_combo_mode;
+	CComboBox m_combo_tau;
 	config conf;
 };
 
