@@ -184,8 +184,7 @@ public:
 
 		if (chunk->get_channels() == 1 && chunk->get_channel_config() == audio_chunk::channel_config_mono) {
 			mixed_output_audio_buf.swap(output_audio_buf.first);
-		}
-		else {
+		} else {
 			interpolation(input_audio_buf.second.data(), sample_count, output_audio_buf.second.data(), (uint32_t)(sample_count * integerfactor), last_in_samples_l);
 			if ((mode != 2) && (tau != 2)) /* FM mode */
 				preemph(output_audio_buf.second.data(), prev_samples[1], (uint32_t)(sample_count * integerfactor), tau);
@@ -353,13 +352,13 @@ private:
 
 		if (mode == 2) { //AM mode
 			for (uint32_t i = 0; i < input_len; i++) {
-				double	audio_amp = input[i] * dsp_gain;
+				double	audio_amp = input[i] * dsp_gain + 0.5;
 
 				if (fabs(audio_amp) > 1.0)
 					audio_amp = (audio_amp > 0.0) ? 1.0 : -1.0;
 
-				output[i * 2] = 0;
-				output[i * 2 + 1] = (float)audio_amp;
+				output[i * 2] = (float)audio_amp;
+				output[i * 2 + 1] = 0;
 			}
 		} else { //FM mode
 			for (uint32_t i = 0; i < input_len; i++) {
@@ -561,27 +560,27 @@ private:
 			case IDC_COMBO_MODE:
 				if (uNotifyCode == CBN_SELCHANGE) {
 					switch (m_combo_mode.GetCurSel()) {
-					case 0: /* WBFM mode */
-						m_check_stereo.SetCheck(1);
-						m_check_stereo.EnableWindow();
+						case 0: /* WBFM mode */
+							m_check_stereo.SetCheck(1);
+							m_check_stereo.EnableWindow();
 
-						m_combo_tau.SetCurSel(0);
-						m_combo_tau.EnableWindow();
-						break;
-					case 1: /* NBFM mode */
-						m_check_stereo.SetCheck(0);
-						m_check_stereo.EnableWindow(FALSE);
+							m_combo_tau.SetCurSel(0);
+							m_combo_tau.EnableWindow();
+							break;
+						case 1: /* NBFM mode */
+							m_check_stereo.SetCheck(0);
+							m_check_stereo.EnableWindow(FALSE);
 
-						m_combo_tau.SetCurSel(0);
-						m_combo_tau.EnableWindow();
-						break;
-					case 2: /* AM mode */
-						m_check_stereo.SetCheck(0);
-						m_check_stereo.EnableWindow(FALSE);
+							m_combo_tau.SetCurSel(0);
+							m_combo_tau.EnableWindow();
+							break;
+						case 2: /* AM mode */
+							m_check_stereo.SetCheck(0);
+							m_check_stereo.EnableWindow(FALSE);
 
-						m_combo_tau.SetCurSel(2);
-						m_combo_tau.EnableWindow(FALSE);
-						break;
+							m_combo_tau.SetCurSel(2);
+							m_combo_tau.EnableWindow(FALSE);
+							break;
 					}
 					m_check_stereo.UpdateWindow();
 					m_combo_tau.UpdateWindow();
