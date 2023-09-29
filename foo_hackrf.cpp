@@ -509,8 +509,10 @@ private:
 			m_combo_mode.AddString(L"AM");
 			m_combo_mode.SetCurSel(_config.mode);
 
-			m_combo_tau.AddString(L"75μs");
+			// 75us premph is mostly used in the US
+			// while 50us is mostly in Europe
 			m_combo_tau.AddString(L"50μs");
+			m_combo_tau.AddString(L"75μs");
 			m_combo_tau.AddString(L"0μs");
 			m_combo_tau.SetCurSel(_config.tau);
 
